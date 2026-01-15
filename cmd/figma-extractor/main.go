@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const version = "1.0.0"
+
 var (
 	figmaURL    string
 	accessToken string
@@ -32,6 +34,16 @@ func main() {
 
 	rootCmd.MarkFlagRequired("url")
 	rootCmd.MarkFlagRequired("token")
+
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print the version number",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("figma-extractor version %s\n", version)
+		},
+	}
+
+	rootCmd.AddCommand(versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
