@@ -9,6 +9,8 @@ A Go tool to extract design specifications from Figma files using the Figma REST
 - 📏 **Spacing**: Identifies spacing patterns and normalizes them to a standard scale
 - 🌈 **Visual Effects**: Extracts shadows and border radii
 - 📐 **Layout Specs**: Captures layout dimensions like header height and sidebar width
+- 🎯 **Node-Specific Extraction**: Extract specific elements or components instead of the entire file
+- 📦 **Multi-Node Support**: Extract multiple nodes in a single operation
 - 📄 **Markdown Output**: Generates a comprehensive markdown file with all specifications
 
 ## Installation
@@ -21,8 +23,44 @@ go install github.com/kataras/figma-extractor/cmd/figma-extractor@latest
 
 ## Usage
 
+### Basic Usage (Extract Entire File)
+
 ```bash
 figma-extractor --url "https://www.figma.com/file/YOUR_FILE_KEY/Design-Name" --token "YOUR_ACCESS_TOKEN"
+```
+
+### Extract Specific Nodes
+
+Extract one or more specific elements from your Figma file:
+
+```bash
+# Extract a single node by ID
+figma-extractor \
+  --url "https://www.figma.com/file/YOUR_FILE_KEY/Design" \
+  --token "YOUR_ACCESS_TOKEN" \
+  --node-ids "123:456"
+
+# Extract multiple nodes
+figma-extractor \
+  --url "https://www.figma.com/file/YOUR_FILE_KEY/Design" \
+  --token "YOUR_ACCESS_TOKEN" \
+  --node-ids "123:456,789:012,345:678"
+```
+
+### Extract from Figma Share Links
+
+The tool automatically detects node IDs from Figma share URLs:
+
+```bash
+# URL with node-id query parameter (most common)
+figma-extractor \
+  --url "https://www.figma.com/file/ABC123/Design?node-id=123:456" \
+  --token "YOUR_ACCESS_TOKEN"
+
+# URL with multiple nodes
+figma-extractor \
+  --url "https://www.figma.com/file/ABC123/Design?node-id=123:456,789:012" \
+  --token "YOUR_ACCESS_TOKEN"
 ```
 
 ### Getting a Figma Personal Access Token
@@ -40,14 +78,42 @@ figma-extractor --url "https://www.figma.com/file/YOUR_FILE_KEY/Design-Name" --t
 - `--url, -u`: Figma file URL (required)
 - `--token, -t`: Figma Personal Access Token (required)
 - `--output, -o`: Output markdown file (default: `FIGMA_DESIGN_SPECIFICATIONS.md`)
+- `--node-ids, -n`: Comma-separated node IDs to extract (optional)
 
-### Example
+### Examples
 
+**Extract entire file:**
 ```bash
 figma-extractor \
   --url "https://www.figma.com/file/abc123xyz/My-Design-System" \
   --token "figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   --output "design-specs.md"
+```
+
+**Extract specific component:**
+```bash
+figma-extractor \
+  --url "https://www.figma.com/file/abc123xyz/My-Design-System" \
+  --token "figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  --node-ids "123:456" \
+  --output "button-component.md"
+```
+
+**Extract from share link with node ID:**
+```bash
+figma-extractor \
+  --url "https://www.figma.com/file/abc123xyz/My-Design-System?node-id=123:456" \
+  --token "figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  --output "component-specs.md"
+```
+
+**Extract multiple related components:**
+```bash
+figma-extractor \
+  --url "https://www.figma.com/file/abc123xyz/My-Design-System" \
+  --token "figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  --node-ids "123:456,789:012,345:678" \
+  --output "button-variants.md"
 ```
 
 ## Output Format
@@ -74,6 +140,8 @@ The tool generates a markdown file with the following sections:
 
 ## How It Works
 
+### Full File Extraction
+
 1. **Authentication**: Connects to the Figma API using your personal access token
 2. **File Retrieval**: Fetches the complete file data including all nodes and styles
 3. **Recursive Extraction**: Traverses the entire document tree and extracts:
@@ -85,6 +153,27 @@ The tool generates a markdown file with the following sections:
 4. **Categorization**: Automatically categorizes extracted values based on node names and properties
 5. **Normalization**: Deduplicates and normalizes values to standard scales
 6. **Markdown Generation**: Formats all specifications as CSS variables in a markdown document
+
+### Node-Specific Extraction
+
+1. **Node ID Detection**: Extracts node IDs from the URL or `--node-ids` flag
+   - Supports query parameter format: `?node-id=123:456`
+   - Supports URL-encoded format: `?node-id=123-456`
+   - Supports multiple nodes: `?node-id=123:456,789:012`
+2. **Targeted Fetch**: Fetches only the specified nodes using the Figma `/nodes` API endpoint
+3. **Context Preservation**: Also fetches file-level metadata to include:
+   - Published styles and colors
+   - Global typography definitions
+   - File-level design tokens
+4. **Smart Extraction**: Extracts specifications from target nodes and their children
+5. **Merge & Deduplicate**: Combines node-specific specs with file-level context
+6. **Markdown Output**: Generates the same comprehensive markdown format
+
+**Benefits of Node Extraction:**
+- ⚡ **Faster**: Only fetches and processes specific elements
+- 🎯 **Focused**: Perfect for extracting individual components or screens
+- 📦 **Efficient**: Works great with large Figma files
+- 🔗 **Convenient**: Works directly with Figma share links
 
 ## Integration with Claude
 
@@ -120,12 +209,41 @@ The tool generates CSS variables like:
 --radius-lg: 8px;
 ```
 
+## Node ID Formats
+
+The tool supports all common Figma URL formats for node identification:
+
+### Query Parameter (Most Common)
+```
+https://www.figma.com/file/ABC123/Design?node-id=123:456
+https://www.figma.com/design/ABC123/Design?node-id=123-456  (URL-encoded colon)
+```
+
+### Multiple Nodes
+```
+https://www.figma.com/file/ABC123/Design?node-id=123:456,789:012
+```
+
+### Hash Fragment
+```
+https://www.figma.com/file/ABC123/Design#123:456
+```
+
+### Finding Node IDs
+
+To find a node ID in Figma:
+1. Right-click on any element in Figma
+2. Select "Copy link to selection"
+3. The copied URL will contain the node ID in the format shown above
+4. Use that URL directly with figma-extractor
+
 ## Limitations
 
 - Requires a valid Figma Personal Access Token
 - Can only access files you have permission to view
 - Color categorization is based on node naming conventions
-- Very large files may take longer to process
+- Very large files may take longer to process (use node extraction for better performance)
+- Node IDs must exist in the specified file
 
 ## Contributing
 

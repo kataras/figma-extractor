@@ -109,6 +109,136 @@ func Extract(fileResp *figma.FileResponse) *DesignSpecs {
 	return specs
 }
 
+// ExtractNodes analyzes specific nodes from a Figma file and extracts their design specifications
+// while preserving file-level context (colors, styles, typography from the document root).
+// This is more efficient than extracting the entire file when you only need specific elements.
+//
+// Parameters:
+//   - fileResp: The complete file response for accessing file-level metadata and styles
+//   - nodesResp: The nodes response containing the specific nodes to extract
+//   - nodeIDs: List of node IDs being extracted (for validation and reporting)
+//
+// Returns a DesignSpecs containing specifications from the target nodes merged with file-level context.
+func ExtractNodes(fileResp *figma.FileResponse, nodesResp *figma.NodesResponse, nodeIDs []string) *DesignSpecs {
+	specs := &DesignSpecs{
+		Colors: ColorPalette{
+			Primary:    make(map[string]string),
+			Secondary:  make(map[string]string),
+			Background: make(map[string]string),
+			Text:       make(map[string]string),
+			Status:     make(map[string]string),
+			Border:     make(map[string]string),
+		},
+		Typography: Typography{
+			FontSizes:   make(map[string]float64),
+			FontWeights: make(map[string]float64),
+			LineHeights: make(map[string]float64),
+		},
+		Spacing: Spacing{
+			Values: make(map[string]float64),
+		},
+		Radii: BorderRadii{
+			Values: make(map[string]float64),
+		},
+		Shadows: []Shadow{},
+		Layout:  LayoutSpecs{},
+	}
+
+	// First, extract file-level context from the document root
+	// This includes published styles, global colors, and typography definitions
+	extractFileContext(&fileResp.Document, specs)
+
+	// Extract specifications from each target node
+	for _, nodeID := range nodeIDs {
+		if nodeData, exists := nodesResp.Nodes[nodeID]; exists {
+			extractFromNode(&nodeData.Document, specs)
+		}
+	}
+
+	// Normalize and categorize extracted values (deduplicates automatically)
+	normalizeSpecs(specs)
+
+	return specs
+}
+
+// extractFileContext extracts file-level design system context from the document root and its immediate children.
+// This includes document-level colors, styles, and typography that should be preserved even when
+// extracting specific nodes. It processes the root node and its direct children (typically pages/frames
+// that contain design system definitions), but doesn't recurse deeper to avoid extracting the entire file.
+func extractFileContext(node *figma.Node, specs *DesignSpecs) {
+	// Extract properties from the document root itself
+	extractNodeProperties(node, specs)
+
+	// Also process immediate children (one level deep)
+	// These often contain style pages, color palettes, or design system definitions
+	for _, child := range node.Children {
+		extractNodeProperties(&child, specs)
+	}
+}
+
+// extractNodeProperties extracts design properties from a single node without recursing.
+// This is used by extractFileContext to gather file-level context without processing entire subtrees.
+func extractNodeProperties(node *figma.Node, specs *DesignSpecs) {
+	// Extract background colors
+	if node.BackgroundColor != nil {
+		colorHex := colorToHex(node.BackgroundColor)
+		specs.Colors.Background[node.Name] = colorHex
+	}
+
+	// Extract colors from fills
+	for _, fill := range node.Fills {
+		if fill.Type == "SOLID" && fill.Color != nil && fill.Visible {
+			colorHex := colorToHex(fill.Color)
+			categorizeColor(node.Name, colorHex, specs)
+		}
+	}
+
+	// Extract colors from strokes
+	for _, stroke := range node.Strokes {
+		if stroke.Type == "SOLID" && stroke.Color != nil && stroke.Visible {
+			colorHex := colorToHex(stroke.Color)
+			specs.Colors.Border[node.Name] = colorHex
+		}
+	}
+
+	// Extract typography
+	if node.Style != nil {
+		if node.Style.FontFamily != "" && specs.Typography.FontFamily == "" {
+			specs.Typography.FontFamily = node.Style.FontFamily
+		}
+		if node.Style.FontSize > 0 {
+			specs.Typography.FontSizes[node.Name] = node.Style.FontSize
+		}
+		if node.Style.FontWeight > 0 {
+			specs.Typography.FontWeights[node.Name] = node.Style.FontWeight
+		}
+		if node.Style.LineHeightPx > 0 {
+			specs.Typography.LineHeights[node.Name] = node.Style.LineHeightPx
+		}
+	}
+
+	// Extract shadows
+	for _, effect := range node.Effects {
+		if (effect.Type == "DROP_SHADOW" || effect.Type == "INNER_SHADOW") && effect.Visible {
+			shadow := Shadow{
+				Name:   node.Name,
+				Type:   effect.Type,
+				X:      effect.Offset.X,
+				Y:      effect.Offset.Y,
+				Blur:   effect.Radius,
+				Spread: effect.Spread,
+				Color:  colorToHex(effect.Color),
+			}
+			specs.Shadows = append(specs.Shadows, shadow)
+		}
+	}
+
+	// Extract border radii
+	if node.CornerRadius > 0 {
+		specs.Radii.Values[node.Name] = node.CornerRadius
+	}
+}
+
 // extractFromNode recursively traverses the Figma document tree and extracts design specifications
 // from each node. It processes fills, strokes, background colors, typography, shadows, border radii,
 // spacing from layout properties, and layout dimensions.

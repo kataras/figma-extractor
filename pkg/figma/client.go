@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -60,6 +61,77 @@ func ExtractFileKey(figmaURL string) (string, error) {
 	}
 
 	return matches[1], nil
+}
+
+// ExtractNodeIDs extracts node identifiers from a Figma URL.
+// Supports multiple formats:
+//   - Query parameter: ?node-id=123:456 or ?node-id=123-456 or ?node-id=123:456,789:012
+//   - Hash fragment: #123:456 or #123:456,789:012
+//   - Path format: /nodes/123:456 or /nodes/123:456,789:012
+//
+// Returns an empty slice if no node IDs are found (not an error).
+// Normalizes URL-encoded colons (123-456 → 123:456).
+func ExtractNodeIDs(figmaURL string) ([]string, error) {
+	nodeIDs := make([]string, 0)
+
+	// Try query parameter format: ?node-id=123:456 or ?node-id=123-456
+	queryRe := regexp.MustCompile(`[?&]node-id=([^&]+)`)
+	if matches := queryRe.FindStringSubmatch(figmaURL); len(matches) >= 2 {
+		// Split by comma for multiple nodes
+		ids := strings.Split(matches[1], ",")
+		for _, id := range ids {
+			// Normalize: replace URL-encoded dash with colon
+			id = strings.ReplaceAll(strings.TrimSpace(id), "-", ":")
+			if id != "" {
+				nodeIDs = append(nodeIDs, id)
+			}
+		}
+		return deduplicateNodeIDs(nodeIDs), nil
+	}
+
+	// Try hash fragment format: #123:456 or #123:456,789:012
+	hashRe := regexp.MustCompile(`#([0-9:-]+(?:,[0-9:-]+)*)`)
+	if matches := hashRe.FindStringSubmatch(figmaURL); len(matches) >= 2 {
+		ids := strings.Split(matches[1], ",")
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				nodeIDs = append(nodeIDs, id)
+			}
+		}
+		return deduplicateNodeIDs(nodeIDs), nil
+	}
+
+	// Try path format: /nodes/123:456 or /nodes/123:456,789:012
+	pathRe := regexp.MustCompile(`/nodes/([0-9:-]+(?:,[0-9:-]+)*)`)
+	if matches := pathRe.FindStringSubmatch(figmaURL); len(matches) >= 2 {
+		ids := strings.Split(matches[1], ",")
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				nodeIDs = append(nodeIDs, id)
+			}
+		}
+		return deduplicateNodeIDs(nodeIDs), nil
+	}
+
+	// No node IDs found - return empty slice (not an error)
+	return nodeIDs, nil
+}
+
+// deduplicateNodeIDs removes duplicate node IDs while preserving order.
+func deduplicateNodeIDs(nodeIDs []string) []string {
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(nodeIDs))
+
+	for _, id := range nodeIDs {
+		if !seen[id] {
+			seen[id] = true
+			result = append(result, id)
+		}
+	}
+
+	return result
 }
 
 // GetFile retrieves complete file data from the Figma API including document structure, styles, and metadata.
@@ -118,6 +190,94 @@ func (c *Client) GetFile(fileKey string) (*FileResponse, error) {
 		}
 
 		return &fileResp, nil
+	}
+
+	return nil, lastErr
+}
+
+// GetFileNodes retrieves specific nodes from a Figma file by their node IDs.
+// This is more efficient than fetching the entire file when you only need specific elements.
+// Implements automatic retry logic (up to 3 attempts) with exponential backoff for handling rate limits.
+// Parameters:
+//   - fileKey: The Figma file identifier
+//   - nodeIDs: Slice of node IDs to fetch (e.g., ["123:456", "789:012"])
+//
+// Returns a NodesResponse containing the requested nodes with their complete structure.
+func (c *Client) GetFileNodes(fileKey string, nodeIDs []string) (*NodesResponse, error) {
+	if len(nodeIDs) == 0 {
+		return nil, fmt.Errorf("no node IDs provided")
+	}
+
+	// Join node IDs with comma for the API request
+	idsParam := strings.Join(nodeIDs, ",")
+	url := fmt.Sprintf("%s/files/%s/nodes?ids=%s", figmaAPIBase, fileKey, idsParam)
+
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("X-Figma-Token", c.accessToken)
+		req.Header.Set("Connection", "close")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("attempt %d failed to execute request: %w", attempt, err)
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt) * 2 * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			lastErr = fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+			if attempt < maxRetries && (resp.StatusCode == 429 || resp.StatusCode >= 500) {
+				time.Sleep(time.Duration(attempt) * 2 * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("attempt %d failed to read response body: %w", attempt, err)
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt) * 2 * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		var nodesResp NodesResponse
+		if err := json.Unmarshal(body, &nodesResp); err != nil {
+			return nil, fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		// Verify that all requested nodes were returned
+		if len(nodesResp.Nodes) == 0 {
+			return nil, fmt.Errorf("no nodes found for the provided IDs: %s", idsParam)
+		}
+
+		// Check for nodes that weren't found
+		missingNodes := make([]string, 0)
+		for _, id := range nodeIDs {
+			if _, exists := nodesResp.Nodes[id]; !exists {
+				missingNodes = append(missingNodes, id)
+			}
+		}
+
+		if len(missingNodes) > 0 {
+			return nil, fmt.Errorf("nodes not found: %s", strings.Join(missingNodes, ", "))
+		}
+
+		return &nodesResp, nil
 	}
 
 	return nil, lastErr

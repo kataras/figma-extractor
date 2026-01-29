@@ -12,6 +12,31 @@ type FileResponse struct {
 	SchemaVersion int              `json:"schemaVersion"`
 }
 
+// NodesResponse represents the response from the Figma nodes API endpoint when fetching specific nodes.
+// It contains file metadata and a map of node IDs to their corresponding NodeData.
+type NodesResponse struct {
+	Name         string              `json:"name"`
+	LastModified string              `json:"lastModified"`
+	Version      string              `json:"version"`
+	Nodes        map[string]NodeData `json:"nodes"`
+}
+
+// NodeData wraps a node with its document structure and optional component/style information.
+// This is the structure returned for each requested node in a NodesResponse.
+type NodeData struct {
+	Document   Node                 `json:"document"`
+	Components map[string]Component `json:"components,omitempty"`
+	Styles     map[string]Style     `json:"styles,omitempty"`
+}
+
+// Component represents a Figma component definition with its metadata.
+// Components are reusable design elements that can be instantiated throughout the file.
+type Component struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 // StylesResponse represents the response from the Figma styles API endpoint.
 // It includes metadata about all published styles in the file and their detailed information.
 type StylesResponse struct {
