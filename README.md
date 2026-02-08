@@ -79,6 +79,7 @@ figma-extractor \
 - `--token, -t`: Figma Personal Access Token (required)
 - `--output, -o`: Output markdown file (default: `FIGMA_DESIGN_SPECIFICATIONS.md`)
 - `--node-ids, -n`: Comma-separated node IDs to extract (optional)
+- `--inherit-context, -i`: Inherit file-level context (colors, styles) when extracting specific nodes (default: false)
 
 ### Examples
 
@@ -105,6 +106,15 @@ figma-extractor \
   --url "https://www.figma.com/file/abc123xyz/My-Design-System?node-id=123:456" \
   --token "figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   --output "component-specs.md"
+```
+
+**Extract node with file-level context (colors, styles):**
+```bash
+figma-extractor \
+  --url "https://www.figma.com/file/abc123xyz/My-Design-System?node-id=123:456" \
+  --token "figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  --inherit-context \
+  --output "component-with-styles.md"
 ```
 
 **Extract multiple related components:**
@@ -161,12 +171,12 @@ The tool generates a markdown file with the following sections:
    - Supports URL-encoded format: `?node-id=123-456`
    - Supports multiple nodes: `?node-id=123:456,789:012`
 2. **Targeted Fetch**: Fetches only the specified nodes using the Figma `/nodes` API endpoint
-3. **Context Preservation**: Also fetches file-level metadata to include:
-   - Published styles and colors
+3. **Smart Extraction**: Extracts specifications from target nodes and their children
+4. **Optional Context Inheritance**: Use `--inherit-context` flag to include:
+   - Published styles and colors from document root
    - Global typography definitions
    - File-level design tokens
-4. **Smart Extraction**: Extracts specifications from target nodes and their children
-5. **Merge & Deduplicate**: Combines node-specific specs with file-level context
+5. **Normalization & Deduplication**: Normalizes values to standard scales
 6. **Markdown Output**: Generates the same comprehensive markdown format
 
 **Benefits of Node Extraction:**
@@ -174,6 +184,7 @@ The tool generates a markdown file with the following sections:
 - 🎯 **Focused**: Perfect for extracting individual components or screens
 - 📦 **Efficient**: Works great with large Figma files
 - 🔗 **Convenient**: Works directly with Figma share links
+- 🎛️ **Flexible**: Choose whether to include file-level context or not
 
 ## Integration with Claude
 

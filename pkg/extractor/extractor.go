@@ -109,17 +109,18 @@ func Extract(fileResp *figma.FileResponse) *DesignSpecs {
 	return specs
 }
 
-// ExtractNodes analyzes specific nodes from a Figma file and extracts their design specifications
-// while preserving file-level context (colors, styles, typography from the document root).
+// ExtractNodes analyzes specific nodes from a Figma file and extracts their design specifications.
 // This is more efficient than extracting the entire file when you only need specific elements.
 //
 // Parameters:
 //   - fileResp: The complete file response for accessing file-level metadata and styles
 //   - nodesResp: The nodes response containing the specific nodes to extract
 //   - nodeIDs: List of node IDs being extracted (for validation and reporting)
+//   - inheritFileContext: If true, includes file-level context (document root colors, styles);
+//     if false, extracts only from the specified nodes
 //
-// Returns a DesignSpecs containing specifications from the target nodes merged with file-level context.
-func ExtractNodes(fileResp *figma.FileResponse, nodesResp *figma.NodesResponse, nodeIDs []string) *DesignSpecs {
+// Returns a DesignSpecs containing specifications from the target nodes, optionally merged with file-level context.
+func ExtractNodes(fileResp *figma.FileResponse, nodesResp *figma.NodesResponse, nodeIDs []string, inheritFileContext bool) *DesignSpecs {
 	specs := &DesignSpecs{
 		Colors: ColorPalette{
 			Primary:    make(map[string]string),
@@ -144,9 +145,11 @@ func ExtractNodes(fileResp *figma.FileResponse, nodesResp *figma.NodesResponse, 
 		Layout:  LayoutSpecs{},
 	}
 
-	// First, extract file-level context from the document root
+	// Optionally extract file-level context from the document root
 	// This includes published styles, global colors, and typography definitions
-	extractFileContext(&fileResp.Document, specs)
+	if inheritFileContext {
+		extractFileContext(&fileResp.Document, specs)
+	}
 
 	// Extract specifications from each target node
 	for _, nodeID := range nodeIDs {

@@ -16,10 +16,11 @@ import (
 const version = figma.Version
 
 var (
-	figmaURL    string
-	accessToken string
-	outputFile  string
-	nodeIDs     string
+	figmaURL           string
+	accessToken        string
+	outputFile         string
+	nodeIDs            string
+	inheritFileContext bool
 )
 
 func main() {
@@ -34,6 +35,7 @@ func main() {
 	rootCmd.Flags().StringVarP(&accessToken, "token", "t", "", "Figma Personal Access Token (required)")
 	rootCmd.Flags().StringVarP(&outputFile, "output", "o", "FIGMA_DESIGN_SPECIFICATIONS.md", "Output markdown file")
 	rootCmd.Flags().StringVarP(&nodeIDs, "node-ids", "n", "", "Comma-separated node IDs to extract (optional, extracts specific nodes instead of entire file)")
+	rootCmd.Flags().BoolVarP(&inheritFileContext, "inherit-context", "i", false, "Inherit file-level context (colors, styles) when extracting specific nodes")
 
 	rootCmd.MarkFlagRequired("url")
 	rootCmd.MarkFlagRequired("token")
@@ -134,7 +136,7 @@ func run(cmd *cobra.Command, args []string) {
 
 		// Extract design specifications from nodes
 		yellow.Print("🔍 Extracting design specifications from nodes... ")
-		specs = extractor.ExtractNodes(fileResp, nodesResp, targetNodeIDs)
+		specs = extractor.ExtractNodes(fileResp, nodesResp, targetNodeIDs, inheritFileContext)
 		green.Println("✓")
 	} else {
 		// Full file extraction
