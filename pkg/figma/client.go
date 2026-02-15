@@ -359,6 +359,70 @@ func (c *Client) GetImages(fileKey string, nodeIDs []string, format string, scal
 	return nil, lastErr
 }
 
+// GetFileImages retrieves download URLs for all embedded images in a Figma file.
+// Calls GET /v1/files/:key/images and returns a map of imageRef -> download URL.
+// Implements automatic retry logic (up to 3 attempts) with exponential backoff.
+func (c *Client) GetFileImages(fileKey string) (*FileImagesResponse, error) {
+	url := fmt.Sprintf("%s/files/%s/images", figmaAPIBase, fileKey)
+
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("X-Figma-Token", c.accessToken)
+		req.Header.Set("Connection", "close")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("attempt %d failed to execute request: %w", attempt, err)
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt) * 2 * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			lastErr = fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+			if attempt < maxRetries && (resp.StatusCode == 429 || resp.StatusCode >= 500) {
+				time.Sleep(time.Duration(attempt) * 2 * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("attempt %d failed to read response body: %w", attempt, err)
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt) * 2 * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		var imgResp FileImagesResponse
+		if err := json.Unmarshal(body, &imgResp); err != nil {
+			return nil, fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		if imgResp.Err != nil {
+			return nil, fmt.Errorf("Figma file images API error: %s", *imgResp.Err)
+		}
+
+		return &imgResp, nil
+	}
+
+	return nil, lastErr
+}
+
 // GetFileStyles retrieves all published styles (colors, text, effects, grids) from a Figma file.
 // This includes style metadata such as names, descriptions, and type information.
 func (c *Client) GetFileStyles(fileKey string) (*StylesResponse, error) {

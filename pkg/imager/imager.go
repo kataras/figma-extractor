@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,13 @@ type ExportedAsset struct {
 type ExportResult struct {
 	Assets []ExportedAsset
 	Errors []error // non-fatal per-image download failures
+}
+
+// ImageFillNode represents a node that contains an embedded IMAGE fill.
+type ImageFillNode struct {
+	NodeID   string
+	NodeName string
+	ImageRef string
 }
 
 const maxNodesPerRequest = 100
@@ -213,4 +221,107 @@ func toKebabCase(s string) string {
 	}
 
 	return result.String()
+}
+
+// CollectImageFillNodes walks the Figma node tree and returns nodes that have
+// an IMAGE type fill with a non-empty ImageRef (embedded images).
+func CollectImageFillNodes(root *figma.Node) []ImageFillNode {
+	var nodes []ImageFillNode
+	collectImageFills(root, &nodes)
+	return nodes
+}
+
+func collectImageFills(node *figma.Node, nodes *[]ImageFillNode) {
+	for _, fill := range node.Fills {
+		if fill.Type == "IMAGE" && fill.ImageRef != "" {
+			*nodes = append(*nodes, ImageFillNode{
+				NodeID:   node.ID,
+				NodeName: node.Name,
+				ImageRef: fill.ImageRef,
+			})
+			break // one entry per node is enough
+		}
+	}
+	for i := range node.Children {
+		collectImageFills(&node.Children[i], nodes)
+	}
+}
+
+// ExportImageFills downloads embedded images using the file images API response.
+// It matches each ImageFillNode's ImageRef to a download URL from the FileImagesResponse.
+func ExportImageFills(fileImagesResp *figma.FileImagesResponse, imageFillNodes []ImageFillNode, config ExportConfig) (*ExportResult, error) {
+	if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create output directory %q: %w", config.OutputDir, err)
+	}
+
+	result := &ExportResult{}
+	usedNames := make(map[string]int)
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxParallelDownloads)
+	var mu sync.Mutex
+
+	for _, node := range imageFillNodes {
+		downloadURL, ok := fileImagesResp.Images[node.ImageRef]
+		if !ok || downloadURL == "" {
+			result.Errors = append(result.Errors, fmt.Errorf("no download URL for image ref %s (node %s)", node.ImageRef, node.NodeName))
+			continue
+		}
+
+		ext := detectExtensionFromURL(downloadURL)
+		fileName := buildFileName(node.NodeName, node.NodeID, ext, 1)
+
+		// Deduplicate filenames.
+		if count, exists := usedNames[fileName]; exists {
+			fileExt := filepath.Ext(fileName)
+			base := strings.TrimSuffix(fileName, fileExt)
+			fileName = fmt.Sprintf("%s-%d%s", base, count+1, fileExt)
+			usedNames[fileName] = count + 1
+		} else {
+			usedNames[fileName] = 1
+		}
+
+		destPath := filepath.Join(config.OutputDir, fileName)
+
+		wg.Add(1)
+		go func(n ImageFillNode, dlURL, dest, fName string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			if err := downloadFile(dlURL, dest); err != nil {
+				mu.Lock()
+				result.Errors = append(result.Errors, fmt.Errorf("failed to download image fill %s: %w", n.NodeName, err))
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			result.Assets = append(result.Assets, ExportedAsset{
+				NodeID:   n.NodeID,
+				NodeName: n.NodeName,
+				FileName: fName,
+				Format:   filepath.Ext(fName)[1:], // strip leading dot
+				Scale:    1,
+			})
+			mu.Unlock()
+		}(node, downloadURL, destPath, fileName)
+	}
+
+	wg.Wait()
+	return result, nil
+}
+
+// detectExtensionFromURL extracts the file extension from an image URL path.
+// Falls back to "png" if no recognizable extension is found.
+func detectExtensionFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "png"
+	}
+	ext := filepath.Ext(u.Path)
+	if ext != "" {
+		return ext[1:] // strip leading dot
+	}
+	return "png"
 }

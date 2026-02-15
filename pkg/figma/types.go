@@ -109,12 +109,15 @@ type Color struct {
 }
 
 // Paint represents a fill or stroke applied to a Figma node.
-// It includes the paint type (SOLID, GRADIENT_LINEAR, etc.), visibility, opacity, and color information.
+// It includes the paint type (SOLID, GRADIENT_LINEAR, IMAGE, etc.), visibility, opacity, and color information.
+// For IMAGE type paints, ImageRef references an embedded image and ScaleMode defines how it is rendered.
 type Paint struct {
-	Type    string  `json:"type"`
-	Visible bool    `json:"visible"`
-	Opacity float64 `json:"opacity"`
-	Color   *Color  `json:"color,omitempty"`
+	Type      string  `json:"type"`
+	Visible   bool    `json:"visible"`
+	Opacity   float64 `json:"opacity"`
+	Color     *Color  `json:"color,omitempty"`
+	ImageRef  string  `json:"imageRef,omitempty"`
+	ScaleMode string  `json:"scaleMode,omitempty"`
 }
 
 // Effect represents a visual effect applied to a Figma node such as drop shadows, inner shadows, or blur effects.
@@ -182,4 +185,11 @@ type ExportSetting struct {
 type ImageResponse struct {
 	Err    *string           `json:"err"`
 	Images map[string]string `json:"images"`
+}
+
+// FileImagesResponse represents the response from the Figma file images API endpoint (GET /v1/files/:key/images).
+// It contains a map of image references to their download URLs for all embedded images in the file.
+type FileImagesResponse struct {
+	Err    *string           `json:"err"`
+	Images map[string]string `json:"images"` // imageRef -> download URL
 }

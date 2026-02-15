@@ -189,37 +189,52 @@ func run(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 
-		// Determine which nodes to export
+		config := imager.ExportConfig{
+			Format:    imageFormat,
+			Scales:    scales,
+			OutputDir: imageDir,
+		}
+
+		// Phase 1: Collect and export nodes with ExportSettings via render API.
 		exportNodes := make(map[string]string) // nodeID -> nodeName
 
 		if len(targetNodeIDs) > 0 {
-			// Use the target node IDs; get names from nodesResp
+			// Node-specific mode: walk children to find nodes with ExportSettings.
+			yellow.Print("\n🖼️  Discovering exportable child nodes... ")
 			for _, id := range targetNodeIDs {
-				name := id
 				if nd, ok := nodesResp.Nodes[id]; ok {
-					name = nd.Document.Name
+					childExport := imager.CollectExportableNodes(&nd.Document)
+					for cID, cName := range childExport {
+						exportNodes[cID] = cName
+					}
 				}
-				exportNodes[id] = name
+			}
+			if len(exportNodes) == 0 {
+				// Fall back to the target nodes themselves.
+				yellow.Println("no child export settings found, using target node(s)")
+				for _, id := range targetNodeIDs {
+					name := id
+					if nd, ok := nodesResp.Nodes[id]; ok {
+						name = nd.Document.Name
+					}
+					exportNodes[id] = name
+				}
+			} else {
+				green.Printf("✓ Found %d exportable child node(s)\n", len(exportNodes))
 			}
 		} else {
-			// Full-file mode: discover nodes with exportSettings
+			// Full-file mode: discover nodes with exportSettings.
 			yellow.Print("\n🖼️  Discovering exportable nodes... ")
 			exportNodes = imager.CollectExportableNodes(&fileResp.Document)
 			if len(exportNodes) == 0 {
-				yellow.Println("No nodes with export settings found, skipping image export")
+				yellow.Println("No nodes with export settings found")
 			} else {
 				green.Printf("✓ Found %d exportable node(s)\n", len(exportNodes))
 			}
 		}
 
 		if len(exportNodes) > 0 {
-			yellow.Printf("🖼️  Exporting images to %s... ", imageDir)
-			config := imager.ExportConfig{
-				Format:    imageFormat,
-				Scales:    scales,
-				OutputDir: imageDir,
-			}
-
+			yellow.Printf("🖼️  Exporting rendered images to %s... ", imageDir)
 			result, err := imager.ExportImages(client, fileKey, exportNodes, config)
 			if err != nil {
 				red.Printf("✗\n")
@@ -228,12 +243,10 @@ func run(cmd *cobra.Command, args []string) {
 			}
 			green.Printf("✓ Exported %d image(s)\n", len(result.Assets))
 
-			// Log warnings for failed downloads
 			for _, dlErr := range result.Errors {
 				yellow.Printf("  ⚠ %v\n", dlErr)
 			}
 
-			// Populate specs.ExportedAssets
 			for _, asset := range result.Assets {
 				specs.ExportedAssets = append(specs.ExportedAssets, extractor.ExportedAssetInfo{
 					NodeName: asset.NodeName,
@@ -241,6 +254,58 @@ func run(cmd *cobra.Command, args []string) {
 					Format:   asset.Format,
 					Scale:    asset.Scale,
 				})
+			}
+		}
+
+		// Phase 2: Collect and export embedded IMAGE fill nodes via file images API.
+		var roots []*figma.Node
+		if len(targetNodeIDs) > 0 {
+			for _, id := range targetNodeIDs {
+				if nd, ok := nodesResp.Nodes[id]; ok {
+					doc := nd.Document // copy
+					roots = append(roots, &doc)
+				}
+			}
+		} else {
+			roots = append(roots, &fileResp.Document)
+		}
+
+		var allImageFills []imager.ImageFillNode
+		for _, root := range roots {
+			allImageFills = append(allImageFills, imager.CollectImageFillNodes(root)...)
+		}
+
+		if len(allImageFills) > 0 {
+			yellow.Printf("🖼️  Found %d embedded image(s), fetching download URLs... ", len(allImageFills))
+			fileImagesResp, err := client.GetFileImages(fileKey)
+			if err != nil {
+				red.Printf("✗\n")
+				red.Printf("Error fetching file images: %v\n", err)
+				// Non-fatal: continue without image fills.
+				yellow.Println("  ⚠ Skipping embedded image export")
+			} else {
+				green.Println("✓")
+				yellow.Printf("🖼️  Downloading embedded images to %s... ", imageDir)
+				fillResult, err := imager.ExportImageFills(fileImagesResp, allImageFills, config)
+				if err != nil {
+					red.Printf("✗\n")
+					red.Printf("Error: %v\n", err)
+					os.Exit(1)
+				}
+				green.Printf("✓ Exported %d embedded image(s)\n", len(fillResult.Assets))
+
+				for _, dlErr := range fillResult.Errors {
+					yellow.Printf("  ⚠ %v\n", dlErr)
+				}
+
+				for _, asset := range fillResult.Assets {
+					specs.ExportedAssets = append(specs.ExportedAssets, extractor.ExportedAssetInfo{
+						NodeName: asset.NodeName,
+						FileName: asset.FileName,
+						Format:   asset.Format,
+						Scale:    asset.Scale,
+					})
+				}
 			}
 		}
 	}
