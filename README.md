@@ -11,6 +11,7 @@ A Go tool to extract design specifications from Figma files using the Figma REST
 - 📐 **Layout Specs**: Captures layout dimensions like header height and sidebar width
 - 🎯 **Node-Specific Extraction**: Extract specific elements or components instead of the entire file
 - 📦 **Multi-Node Support**: Extract multiple nodes in a single operation
+- 🖼️ **Image/Asset Export**: Export images and assets directly from Figma (PNG, SVG, JPG, PDF) with multi-scale support
 - 📄 **Markdown Output**: Generates a comprehensive markdown file with all specifications
 
 ## Installation
@@ -80,6 +81,10 @@ figma-extractor \
 - `--output, -o`: Output markdown file (default: `FIGMA_DESIGN_SPECIFICATIONS.md`)
 - `--node-ids, -n`: Comma-separated node IDs to extract (optional)
 - `--inherit-context, -i`: Inherit file-level context (colors, styles) when extracting specific nodes (default: false)
+- `--export-images`: Export images/assets from Figma (default: false)
+- `--image-format`: Image format: `png`, `svg`, `jpg`, `pdf` (default: `png`)
+- `--image-scales`: Comma-separated scale factors, e.g. `"1,2,3"` (default: `1`; ignored for SVG/PDF)
+- `--image-dir`: Output directory for exported images (default: `figma-assets`)
 
 ### Examples
 
@@ -124,6 +129,27 @@ figma-extractor \
   --token "figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   --node-ids "123:456,789:012,345:678" \
   --output "button-variants.md"
+```
+
+**Export all assets/images from the entire file as PNG (1x and 2x):**
+```bash
+figma-extractor \
+  --url "https://www.figma.com/file/abc123xyz/My-Design-System" \
+  --token "figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  --export-images \
+  --image-scales "1,2" \
+  --image-dir "assets"
+```
+
+**Export specific nodes as SVG:**
+```bash
+figma-extractor \
+  --url "https://www.figma.com/file/abc123xyz/My-Design-System" \
+  --token "figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  --node-ids "123:456,789:012" \
+  --export-images \
+  --image-format svg \
+  --image-dir "icons"
 ```
 
 ## Output Format
@@ -185,6 +211,19 @@ The tool generates a markdown file with the following sections:
 - 📦 **Efficient**: Works great with large Figma files
 - 🔗 **Convenient**: Works directly with Figma share links
 - 🎛️ **Flexible**: Choose whether to include file-level context or not
+
+### Image/Asset Export
+
+1. **Opt-in**: Enabled via the `--export-images` flag
+2. **Node Discovery**:
+   - **Full file mode**: Automatically discovers all nodes that have export settings defined by the designer in Figma
+   - **Node-specific mode**: Exports the targeted nodes directly
+3. **Batched API Requests**: Sends node IDs to the Figma Images API in batches of 100 for efficiency
+4. **Concurrent Downloads**: Downloads images in parallel (up to 5 at a time) for speed
+5. **Smart Naming**: Generates kebab-case filenames from node names, with `@2x`/`@3x` suffixes for raster scales > 1 and automatic deduplication of colliding names
+6. **Multi-Format**: Supports PNG, SVG, JPG, and PDF output formats
+7. **Multi-Scale**: Generate multiple scale variants (e.g., 1x, 2x, 3x) in a single run; scale is ignored for vector formats (SVG/PDF)
+8. **Integrated Output**: Exported asset info is included in the generated markdown file
 
 ## Integration with Claude
 

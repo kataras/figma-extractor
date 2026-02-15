@@ -10,14 +10,24 @@ import (
 )
 
 // DesignSpecs represents the complete set of design specifications extracted from a Figma file.
-// It includes color palettes, typography settings, spacing values, shadows, border radii, and layout measurements.
+// It includes color palettes, typography settings, spacing values, shadows, border radii, layout measurements,
+// and optionally exported image assets.
 type DesignSpecs struct {
-	Colors     ColorPalette
-	Typography Typography
-	Spacing    Spacing
-	Shadows    []Shadow
-	Radii      BorderRadii
-	Layout     LayoutSpecs
+	Colors         ColorPalette
+	Typography     Typography
+	Spacing        Spacing
+	Shadows        []Shadow
+	Radii          BorderRadii
+	Layout         LayoutSpecs
+	ExportedAssets []ExportedAssetInfo
+}
+
+// ExportedAssetInfo represents metadata about an exported image asset.
+type ExportedAssetInfo struct {
+	NodeName string
+	FileName string
+	Format   string
+	Scale    float64
 }
 
 // ColorPalette organizes colors into semantic categories for easier reference and usage.

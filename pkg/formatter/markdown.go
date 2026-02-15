@@ -172,33 +172,21 @@ func ToMarkdown(specs *extractor.DesignSpecs, fileName string) string {
 
 	sb.WriteString("\n")
 
-	/*
-		// Implementation notes
-		sb.WriteString("## Implementation Notes\n\n")
-		sb.WriteString("To implement this design:\n\n")
-		sb.WriteString("1. Copy the CSS variables to your `index.css` or design tokens file\n")
-		sb.WriteString("2. Update `tailwind.config.js` to use these values in the theme extension\n")
-		sb.WriteString("3. Apply the color scheme, typography, and spacing consistently across components\n")
-		sb.WriteString("4. Use the specified shadows and border radii for UI elements\n")
-		sb.WriteString("5. Implement the layout structure with the specified dimensions\n\n")
+	// Exported Assets
+	if len(specs.ExportedAssets) > 0 {
+		sb.WriteString("## Exported Assets\n\n")
+		sb.WriteString("| Asset | File | Format | Scale |\n")
+		sb.WriteString("|-------|------|--------|-------|\n")
+		for _, asset := range specs.ExportedAssets {
+			name := asset.NodeName
+			if name == "" {
+				name = asset.FileName
+			}
+			sb.WriteString(fmt.Sprintf("| %s | `%s` | %s | %gx |\n", name, asset.FileName, strings.ToUpper(asset.Format), asset.Scale))
+		}
+		sb.WriteString("\n")
+	}
 
-		sb.WriteString("## Usage Example\n\n")
-		sb.WriteString("```typescript\n")
-		sb.WriteString("// In tailwind.config.js\n")
-		sb.WriteString("export default {\n")
-		sb.WriteString("  theme: {\n")
-		sb.WriteString("    extend: {\n")
-		sb.WriteString("      colors: {\n")
-		sb.WriteString("        // Map your extracted colors here\n")
-		sb.WriteString("      },\n")
-		sb.WriteString("      fontSize: {\n")
-		sb.WriteString("        // Map your extracted font sizes here\n")
-		sb.WriteString("      },\n")
-		sb.WriteString("    },\n")
-		sb.WriteString("  },\n")
-		sb.WriteString("}\n")
-		sb.WriteString("```\n")
-	*/
 	return sb.String()
 }
 

@@ -96,6 +96,7 @@ type Node struct {
 	PaddingTop            float64           `json:"paddingTop,omitempty"`
 	PaddingBottom         float64           `json:"paddingBottom,omitempty"`
 	ItemSpacing           float64           `json:"itemSpacing,omitempty"`
+	ExportSettings        []ExportSetting   `json:"exportSettings,omitempty"`
 }
 
 // Color represents an RGBA color with float values ranging from 0 to 1.
@@ -163,4 +164,22 @@ type Rectangle struct {
 type LayoutConstraint struct {
 	Vertical   string `json:"vertical"`
 	Horizontal string `json:"horizontal"`
+}
+
+// ExportSetting represents an export configuration defined by the designer in Figma.
+// Each node can have multiple export settings with different formats and constraints.
+type ExportSetting struct {
+	Suffix     string `json:"suffix"`
+	Format     string `json:"format"`
+	Constraint struct {
+		Type  string  `json:"type"`
+		Value float64 `json:"value"`
+	} `json:"constraint"`
+}
+
+// ImageResponse represents the response from the Figma Images API endpoint.
+// It contains a map of node IDs to their rendered image URLs, or an error message.
+type ImageResponse struct {
+	Err    *string           `json:"err"`
+	Images map[string]string `json:"images"`
 }
