@@ -20,15 +20,56 @@ type DesignSpecs struct {
 	Radii          BorderRadii
 	Layout         LayoutSpecs
 	ExportedAssets []ExportedAssetInfo
+	NodeTree       []*NodeDescription
 }
 
 // ExportedAssetInfo represents metadata about an exported image asset.
 type ExportedAssetInfo struct {
+	NodeID       string // Figma node ID this asset was exported from
 	NodeName     string
 	FileName     string
 	Format       string
 	Scale        float64
 	IsScreenshot bool // true for the complete design screenshot of the target node(s)
+}
+
+// NodeDescription describes a single node in the Figma design hierarchy with its visual properties.
+type NodeDescription struct {
+	ID   string
+	Name string
+	Type string // FRAME, TEXT, RECTANGLE, COMPONENT, INSTANCE, GROUP, etc.
+
+	// Dimensions
+	Width, Height float64
+
+	// Visual
+	FillColors   []string // hex from SOLID fills
+	ImageFills   []string // imageRef values from IMAGE fills
+	StrokeColors []string
+	StrokeWeight float64
+	CornerRadius float64
+
+	// Text (TEXT nodes only)
+	TextContent         string
+	FontFamily          string
+	FontSize            float64
+	FontWeight          float64
+	LineHeightPx        float64
+	TextAlignHorizontal string
+
+	// Layout (auto-layout)
+	LayoutMode                                         string // "HORIZONTAL", "VERTICAL", ""
+	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float64
+	ItemSpacing                                        float64
+
+	// Effects
+	Shadows []Shadow
+
+	// Linked exported assets (populated after image export)
+	ExportedAssets []ExportedAssetInfo
+
+	// Recursive children
+	Children []*NodeDescription
 }
 
 // ColorPalette organizes colors into semantic categories for easier reference and usage.
@@ -114,6 +155,9 @@ func Extract(fileResp *figma.FileResponse) *DesignSpecs {
 	// Extract colors, typography, and other specs
 	extractFromNode(&fileResp.Document, specs)
 
+	// Build hierarchical node tree
+	specs.NodeTree = []*NodeDescription{buildNodeTree(&fileResp.Document)}
+
 	// Normalize and categorize extracted values
 	normalizeSpecs(specs)
 
@@ -166,6 +210,13 @@ func ExtractNodes(fileResp *figma.FileResponse, nodesResp *figma.NodesResponse, 
 	for _, nodeID := range nodeIDs {
 		if nodeData, exists := nodesResp.Nodes[nodeID]; exists {
 			extractFromNode(&nodeData.Document, specs)
+		}
+	}
+
+	// Build hierarchical node tree for each target node
+	for _, nodeID := range nodeIDs {
+		if nodeData, exists := nodesResp.Nodes[nodeID]; exists {
+			specs.NodeTree = append(specs.NodeTree, buildNodeTree(&nodeData.Document))
 		}
 	}
 
@@ -515,4 +566,114 @@ func normalizeBorderRadii(radii map[string]float64) map[string]float64 {
 	}
 
 	return result
+}
+
+// buildNodeTree recursively walks the Figma Node tree and builds a parallel NodeDescription tree
+// containing all visual properties for each node.
+func buildNodeTree(node *figma.Node) *NodeDescription {
+	nd := &NodeDescription{
+		ID:   node.ID,
+		Name: node.Name,
+		Type: node.Type,
+	}
+
+	// Dimensions
+	if node.AbsoluteBoundingBox != nil {
+		nd.Width = node.AbsoluteBoundingBox.Width
+		nd.Height = node.AbsoluteBoundingBox.Height
+	}
+
+	// Fills
+	for _, fill := range node.Fills {
+		if !fill.Visible {
+			continue
+		}
+		if fill.Type == "SOLID" && fill.Color != nil {
+			nd.FillColors = append(nd.FillColors, colorToHex(fill.Color))
+		}
+		if fill.Type == "IMAGE" && fill.ImageRef != "" {
+			nd.ImageFills = append(nd.ImageFills, fill.ImageRef)
+		}
+	}
+
+	// Strokes
+	for _, stroke := range node.Strokes {
+		if stroke.Type == "SOLID" && stroke.Color != nil && stroke.Visible {
+			nd.StrokeColors = append(nd.StrokeColors, colorToHex(stroke.Color))
+		}
+	}
+	nd.StrokeWeight = node.StrokeWeight
+	nd.CornerRadius = node.CornerRadius
+
+	// Text properties
+	if node.Type == "TEXT" {
+		nd.TextContent = node.Characters
+	}
+	if node.Style != nil {
+		nd.FontFamily = node.Style.FontFamily
+		nd.FontSize = node.Style.FontSize
+		nd.FontWeight = node.Style.FontWeight
+		nd.LineHeightPx = node.Style.LineHeightPx
+		nd.TextAlignHorizontal = node.Style.TextAlignHorizontal
+	}
+
+	// Layout
+	nd.LayoutMode = node.LayoutMode
+	nd.PaddingTop = node.PaddingTop
+	nd.PaddingRight = node.PaddingRight
+	nd.PaddingBottom = node.PaddingBottom
+	nd.PaddingLeft = node.PaddingLeft
+	nd.ItemSpacing = node.ItemSpacing
+
+	// Effects (shadows)
+	for _, effect := range node.Effects {
+		if (effect.Type == "DROP_SHADOW" || effect.Type == "INNER_SHADOW") && effect.Visible {
+			nd.Shadows = append(nd.Shadows, Shadow{
+				Name:   node.Name,
+				Type:   effect.Type,
+				X:      effect.Offset.X,
+				Y:      effect.Offset.Y,
+				Blur:   effect.Radius,
+				Spread: effect.Spread,
+				Color:  colorToHex(effect.Color),
+			})
+		}
+	}
+
+	// Recurse into children
+	for i := range node.Children {
+		nd.Children = append(nd.Children, buildNodeTree(&node.Children[i]))
+	}
+
+	return nd
+}
+
+// AttachAssetsToNodeTree walks the NodeDescription tree and attaches exported assets
+// to the nodes they were exported from, matching by NodeID.
+func AttachAssetsToNodeTree(roots []*NodeDescription, assets []ExportedAssetInfo) {
+	// Build nodeID -> []asset map
+	assetMap := make(map[string][]ExportedAssetInfo)
+	for _, a := range assets {
+		if a.NodeID != "" && !a.IsScreenshot {
+			assetMap[a.NodeID] = append(assetMap[a.NodeID], a)
+		}
+	}
+
+	if len(assetMap) == 0 {
+		return
+	}
+
+	var walk func(nd *NodeDescription)
+	walk = func(nd *NodeDescription) {
+		if matched, ok := assetMap[nd.ID]; ok {
+			nd.ExportedAssets = append(nd.ExportedAssets, matched...)
+		}
+		for _, child := range nd.Children {
+			walk(child)
+		}
+	}
+
+	for _, root := range roots {
+		walk(root)
+	}
 }

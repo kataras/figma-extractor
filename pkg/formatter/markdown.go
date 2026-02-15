@@ -207,7 +207,134 @@ func ToMarkdown(specs *extractor.DesignSpecs, fileName string, imageDir ...strin
 		sb.WriteString("\n")
 	}
 
-	return sb.String()
+	// Component Tree
+	if len(specs.NodeTree) > 0 {
+		sb.WriteString("## Component Tree\n\n")
+		sb.WriteString("Hierarchical node descriptions. Each indented line is a child.\n")
+		sb.WriteString("Format: `[TYPE] Name WxH | property:value ...`\n\n")
+		sb.WriteString("```\n")
+		for _, root := range specs.NodeTree {
+			renderNodeDescription(&sb, root, 0, assetDir)
+		}
+		sb.WriteString("```\n\n")
+	}
+
+	return sanitizeLineTerminators(sb.String())
+}
+
+// sanitizeLineTerminators replaces Unicode Line Separator (U+2028) and
+// Paragraph Separator (U+2029) with standard newlines. These characters
+// can appear in Figma text content and cause "unusual line terminators"
+// warnings in editors.
+func sanitizeLineTerminators(s string) string {
+	s = strings.ReplaceAll(s, "\u2028", "\n")
+	s = strings.ReplaceAll(s, "\u2029", "\n")
+	return s
+}
+
+// renderNodeDescription recursively renders a NodeDescription in a compact one-line-per-node
+// format inside a code block. Properties are appended inline separated by " | ".
+// DOCUMENT and CANVAS wrapper nodes are skipped.
+func renderNodeDescription(sb *strings.Builder, node *extractor.NodeDescription, depth int, assetDir string) {
+	// Skip DOCUMENT and CANVAS wrapper nodes.
+	if node.Type == "DOCUMENT" || node.Type == "CANVAS" {
+		for _, child := range node.Children {
+			renderNodeDescription(sb, child, depth, assetDir)
+		}
+		return
+	}
+
+	indent := strings.Repeat("  ", depth)
+
+	// Build the line: [TYPE] Name WxH | props...
+	var parts []string
+
+	// Size
+	if node.Width > 0 || node.Height > 0 {
+		parts = append(parts, fmt.Sprintf("%.0fx%.0f", node.Width, node.Height))
+	}
+
+	// Fills
+	if len(node.FillColors) > 0 {
+		parts = append(parts, "fill:"+strings.Join(node.FillColors, ","))
+	}
+	if len(node.ImageFills) > 0 {
+		parts = append(parts, "img:"+strings.Join(node.ImageFills, ","))
+	}
+
+	// Stroke
+	if len(node.StrokeColors) > 0 {
+		s := "stroke:" + strings.Join(node.StrokeColors, ",")
+		if node.StrokeWeight > 0 {
+			s += fmt.Sprintf(" %.0fpx", node.StrokeWeight)
+		}
+		parts = append(parts, s)
+	}
+
+	// Corner radius
+	if node.CornerRadius > 0 {
+		parts = append(parts, fmt.Sprintf("radius:%.0f", node.CornerRadius))
+	}
+
+	// Text
+	if node.TextContent != "" {
+		text := node.TextContent
+		if len(text) > 80 {
+			text = text[:80] + "..."
+		}
+		text = strings.ReplaceAll(text, "\n", " ")
+		parts = append(parts, fmt.Sprintf("\"%s\"", text))
+	}
+
+	// Font
+	if node.FontFamily != "" {
+		f := "font:" + node.FontFamily
+		if node.FontSize > 0 {
+			f += fmt.Sprintf("/%.0fpx", node.FontSize)
+		}
+		if node.FontWeight > 0 {
+			f += fmt.Sprintf("/w%.0f", node.FontWeight)
+		}
+		parts = append(parts, f)
+	}
+	if node.TextAlignHorizontal != "" {
+		parts = append(parts, "align:"+node.TextAlignHorizontal)
+	}
+
+	// Layout
+	if node.LayoutMode != "" {
+		parts = append(parts, "layout:"+node.LayoutMode)
+	}
+	if node.PaddingTop > 0 || node.PaddingRight > 0 || node.PaddingBottom > 0 || node.PaddingLeft > 0 {
+		parts = append(parts, fmt.Sprintf("pad:%.0f,%.0f,%.0f,%.0f",
+			node.PaddingTop, node.PaddingRight, node.PaddingBottom, node.PaddingLeft))
+	}
+	if node.ItemSpacing > 0 {
+		parts = append(parts, fmt.Sprintf("gap:%.0f", node.ItemSpacing))
+	}
+
+	// Shadows
+	for _, s := range node.Shadows {
+		parts = append(parts, fmt.Sprintf("shadow:%s/%.0f,%.0f,%.0f/%s",
+			s.Type, s.X, s.Y, s.Blur, s.Color))
+	}
+
+	// Assets
+	for _, a := range node.ExportedAssets {
+		parts = append(parts, "asset:"+assetDir+a.FileName)
+	}
+
+	// Write the line
+	sb.WriteString(fmt.Sprintf("%s[%s] %s", indent, node.Type, node.Name))
+	if len(parts) > 0 {
+		sb.WriteString(" | " + strings.Join(parts, " | "))
+	}
+	sb.WriteString("\n")
+
+	// Recurse children
+	for _, child := range node.Children {
+		renderNodeDescription(sb, child, depth+1, assetDir)
+	}
 }
 
 // toKebabCase converts a string to kebab-case format (lowercase with hyphens).
