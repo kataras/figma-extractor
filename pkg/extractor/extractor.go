@@ -24,10 +24,11 @@ type DesignSpecs struct {
 
 // ExportedAssetInfo represents metadata about an exported image asset.
 type ExportedAssetInfo struct {
-	NodeName string
-	FileName string
-	Format   string
-	Scale    float64
+	NodeName     string
+	FileName     string
+	Format       string
+	Scale        float64
+	IsScreenshot bool // true for the complete design screenshot of the target node(s)
 }
 
 // ColorPalette organizes colors into semantic categories for easier reference and usage.

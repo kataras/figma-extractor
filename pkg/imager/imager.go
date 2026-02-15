@@ -31,8 +31,9 @@ type ExportedAsset struct {
 
 // ExportResult holds the results of an image export operation.
 type ExportResult struct {
-	Assets []ExportedAsset
-	Errors []error // non-fatal per-image download failures
+	Assets          []ExportedAsset
+	Errors          []error          // non-fatal per-image download failures
+	UnresolvedNodes []ImageFillNode  // IMAGE fill nodes with no download URL (need render fallback)
 }
 
 // ImageFillNode represents a node that contains an embedded IMAGE fill.
@@ -249,6 +250,8 @@ func collectImageFills(node *figma.Node, nodes *[]ImageFillNode) {
 
 // ExportImageFills downloads embedded images using the file images API response.
 // It matches each ImageFillNode's ImageRef to a download URL from the FileImagesResponse.
+// Nodes whose ImageRef is not found in the response are returned in UnresolvedNodes
+// so callers can fall back to the render API.
 func ExportImageFills(fileImagesResp *figma.FileImagesResponse, imageFillNodes []ImageFillNode, config ExportConfig) (*ExportResult, error) {
 	if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory %q: %w", config.OutputDir, err)
@@ -264,7 +267,7 @@ func ExportImageFills(fileImagesResp *figma.FileImagesResponse, imageFillNodes [
 	for _, node := range imageFillNodes {
 		downloadURL, ok := fileImagesResp.Images[node.ImageRef]
 		if !ok || downloadURL == "" {
-			result.Errors = append(result.Errors, fmt.Errorf("no download URL for image ref %s (node %s)", node.ImageRef, node.NodeName))
+			result.UnresolvedNodes = append(result.UnresolvedNodes, node)
 			continue
 		}
 
@@ -310,6 +313,16 @@ func ExportImageFills(fileImagesResp *figma.FileImagesResponse, imageFillNodes [
 
 	wg.Wait()
 	return result, nil
+}
+
+// ImageFillNodesToMap converts a slice of ImageFillNode to a nodeID -> nodeName map,
+// suitable for passing to ExportImages as a render-API fallback.
+func ImageFillNodesToMap(nodes []ImageFillNode) map[string]string {
+	m := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		m[n.NodeID] = n.NodeName
+	}
+	return m
 }
 
 // detectExtensionFromURL extracts the file extension from an image URL path.

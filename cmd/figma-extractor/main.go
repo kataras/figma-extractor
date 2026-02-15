@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -195,39 +196,90 @@ func run(cmd *cobra.Command, args []string) {
 			OutputDir: imageDir,
 		}
 
+		// Screenshot: render the target node(s) (or full document) as a complete design screenshot.
+		screenshotName := "complete_design_screenshot." + config.Format
+		screenshotNodes := make(map[string]string) // nodeID -> nodeName
+
+		if len(targetNodeIDs) > 0 {
+			for _, id := range targetNodeIDs {
+				if nd, ok := nodesResp.Nodes[id]; ok {
+					screenshotNodes[id] = nd.Document.Name
+				}
+			}
+		} else {
+			// Full-file: use the document root's first-level pages/frames.
+			screenshotNodes[fileResp.Document.ID] = fileResp.Document.Name
+		}
+
+		yellow.Printf("\n🖼️  Capturing design screenshot to %s... ", screenshotName)
+		screenshotResult, err := imager.ExportImages(client, fileKey, screenshotNodes, imager.ExportConfig{
+			Format:    config.Format,
+			Scales:    []float64{1},
+			OutputDir: config.OutputDir,
+		})
+		if err != nil {
+			red.Printf("✗\n")
+			yellow.Printf("  ⚠ Screenshot failed: %v\n", err)
+		} else {
+			green.Printf("✓\n")
+			// Rename the exported file to the fixed screenshot name.
+			for _, asset := range screenshotResult.Assets {
+				oldPath := filepath.Join(config.OutputDir, asset.FileName)
+				newPath := filepath.Join(config.OutputDir, screenshotName)
+				if err := os.Rename(oldPath, newPath); err != nil {
+					yellow.Printf("  ⚠ Could not rename screenshot: %v\n", err)
+					// Keep the original name.
+					specs.ExportedAssets = append(specs.ExportedAssets, extractor.ExportedAssetInfo{
+						NodeName:     asset.NodeName,
+						FileName:     asset.FileName,
+						Format:       asset.Format,
+						Scale:        asset.Scale,
+						IsScreenshot: true,
+					})
+				} else {
+					specs.ExportedAssets = append(specs.ExportedAssets, extractor.ExportedAssetInfo{
+						NodeName:     asset.NodeName,
+						FileName:     screenshotName,
+						Format:       asset.Format,
+						Scale:        asset.Scale,
+						IsScreenshot: true,
+					})
+				}
+			}
+		}
+
 		// Phase 1: Collect and export nodes with ExportSettings via render API.
+		// Exclude the target root nodes since they were already rendered as screenshots.
 		exportNodes := make(map[string]string) // nodeID -> nodeName
 
 		if len(targetNodeIDs) > 0 {
 			// Node-specific mode: walk children to find nodes with ExportSettings.
-			yellow.Print("\n🖼️  Discovering exportable child nodes... ")
+			yellow.Print("🖼️  Discovering exportable child nodes... ")
 			for _, id := range targetNodeIDs {
 				if nd, ok := nodesResp.Nodes[id]; ok {
 					childExport := imager.CollectExportableNodes(&nd.Document)
 					for cID, cName := range childExport {
+						// Skip the root node(s) — already captured as screenshot.
+						if _, isRoot := screenshotNodes[cID]; isRoot {
+							continue
+						}
 						exportNodes[cID] = cName
 					}
 				}
 			}
 			if len(exportNodes) == 0 {
-				// Fall back to the target nodes themselves.
-				yellow.Println("no child export settings found, using target node(s)")
-				for _, id := range targetNodeIDs {
-					name := id
-					if nd, ok := nodesResp.Nodes[id]; ok {
-						name = nd.Document.Name
-					}
-					exportNodes[id] = name
-				}
+				yellow.Println("no additional exportable child nodes")
 			} else {
 				green.Printf("✓ Found %d exportable child node(s)\n", len(exportNodes))
 			}
 		} else {
 			// Full-file mode: discover nodes with exportSettings.
-			yellow.Print("\n🖼️  Discovering exportable nodes... ")
+			yellow.Print("🖼️  Discovering exportable nodes... ")
 			exportNodes = imager.CollectExportableNodes(&fileResp.Document)
+			// Remove root if present.
+			delete(exportNodes, fileResp.Document.ID)
 			if len(exportNodes) == 0 {
-				yellow.Println("No nodes with export settings found")
+				yellow.Println("no additional exportable nodes")
 			} else {
 				green.Printf("✓ Found %d exportable node(s)\n", len(exportNodes))
 			}
@@ -276,13 +328,16 @@ func run(cmd *cobra.Command, args []string) {
 		}
 
 		if len(allImageFills) > 0 {
+			// Try file images API first for embedded image download URLs.
 			yellow.Printf("🖼️  Found %d embedded image(s), fetching download URLs... ", len(allImageFills))
+			var unresolvedNodes []imager.ImageFillNode
+
 			fileImagesResp, err := client.GetFileImages(fileKey)
 			if err != nil {
 				red.Printf("✗\n")
-				red.Printf("Error fetching file images: %v\n", err)
-				// Non-fatal: continue without image fills.
-				yellow.Println("  ⚠ Skipping embedded image export")
+				yellow.Printf("  ⚠ File images API failed: %v\n", err)
+				// All nodes are unresolved; will fall back to render API.
+				unresolvedNodes = allImageFills
 			} else {
 				green.Println("✓")
 				yellow.Printf("🖼️  Downloading embedded images to %s... ", imageDir)
@@ -292,7 +347,10 @@ func run(cmd *cobra.Command, args []string) {
 					red.Printf("Error: %v\n", err)
 					os.Exit(1)
 				}
-				green.Printf("✓ Exported %d embedded image(s)\n", len(fillResult.Assets))
+
+				if len(fillResult.Assets) > 0 {
+					green.Printf("✓ Exported %d embedded image(s)\n", len(fillResult.Assets))
+				}
 
 				for _, dlErr := range fillResult.Errors {
 					yellow.Printf("  ⚠ %v\n", dlErr)
@@ -305,6 +363,35 @@ func run(cmd *cobra.Command, args []string) {
 						Format:   asset.Format,
 						Scale:    asset.Scale,
 					})
+				}
+
+				unresolvedNodes = fillResult.UnresolvedNodes
+			}
+
+			// Fallback: render unresolved IMAGE fill nodes via the render API.
+			if len(unresolvedNodes) > 0 {
+				yellow.Printf("🖼️  Rendering %d image(s) via render API (no file image URLs)... ", len(unresolvedNodes))
+				renderNodes := imager.ImageFillNodesToMap(unresolvedNodes)
+				renderResult, err := imager.ExportImages(client, fileKey, renderNodes, config)
+				if err != nil {
+					red.Printf("✗\n")
+					red.Printf("Error rendering images: %v\n", err)
+					// Non-fatal: continue.
+				} else {
+					green.Printf("✓ Rendered %d image(s)\n", len(renderResult.Assets))
+
+					for _, dlErr := range renderResult.Errors {
+						yellow.Printf("  ⚠ %v\n", dlErr)
+					}
+
+					for _, asset := range renderResult.Assets {
+						specs.ExportedAssets = append(specs.ExportedAssets, extractor.ExportedAssetInfo{
+							NodeName: asset.NodeName,
+							FileName: asset.FileName,
+							Format:   asset.Format,
+							Scale:    asset.Scale,
+						})
+					}
 				}
 			}
 		}
@@ -339,7 +426,7 @@ func run(cmd *cobra.Command, args []string) {
 
 	// Format as markdown
 	yellow.Printf("\n📝 Generating markdown documentation... ")
-	markdown := formatter.ToMarkdown(specs, fileName)
+	markdown := formatter.ToMarkdown(specs, fileName, imageDir)
 	green.Println("✓")
 
 	// Write to file

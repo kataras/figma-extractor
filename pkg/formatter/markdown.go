@@ -10,11 +10,25 @@ import (
 // ToMarkdown transforms extracted design specifications into a well-formatted markdown document.
 // The output includes CSS variable definitions for colors, typography, spacing, shadows, border radii,
 // and layout specifications, ready to be integrated into a design system or CSS framework.
-func ToMarkdown(specs *extractor.DesignSpecs, fileName string) string {
+func ToMarkdown(specs *extractor.DesignSpecs, fileName string, imageDir ...string) string {
+	assetDir := ""
+	if len(imageDir) > 0 && imageDir[0] != "" {
+		assetDir = imageDir[0] + "/"
+	}
+
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# Figma Design Specifications - %s\n\n", fileName))
 	sb.WriteString("This document contains the complete design specifications extracted from the Figma file.\n\n")
+
+	// Include the complete design screenshot at the top so AI vision models can reference it.
+	for _, asset := range specs.ExportedAssets {
+		if asset.IsScreenshot {
+			sb.WriteString("## Complete Design Screenshot\n\n")
+			sb.WriteString(fmt.Sprintf("![Complete Design Screenshot](%s%s)\n\n", assetDir, asset.FileName))
+			break
+		}
+	}
 
 	// Colors
 	sb.WriteString("## Design System\n\n")
@@ -172,17 +186,23 @@ func ToMarkdown(specs *extractor.DesignSpecs, fileName string) string {
 
 	sb.WriteString("\n")
 
-	// Exported Assets
-	if len(specs.ExportedAssets) > 0 {
+	// Exported Assets (exclude screenshots, they are shown at the top).
+	var exportedAssets []extractor.ExportedAssetInfo
+	for _, asset := range specs.ExportedAssets {
+		if !asset.IsScreenshot {
+			exportedAssets = append(exportedAssets, asset)
+		}
+	}
+	if len(exportedAssets) > 0 {
 		sb.WriteString("## Exported Assets\n\n")
 		sb.WriteString("| Asset | File | Format | Scale |\n")
 		sb.WriteString("|-------|------|--------|-------|\n")
-		for _, asset := range specs.ExportedAssets {
+		for _, asset := range exportedAssets {
 			name := asset.NodeName
 			if name == "" {
 				name = asset.FileName
 			}
-			sb.WriteString(fmt.Sprintf("| %s | `%s` | %s | %gx |\n", name, asset.FileName, strings.ToUpper(asset.Format), asset.Scale))
+			sb.WriteString(fmt.Sprintf("| %s | `%s%s` | %s | %gx |\n", name, assetDir, asset.FileName, strings.ToUpper(asset.Format), asset.Scale))
 		}
 		sb.WriteString("\n")
 	}
