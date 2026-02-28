@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	figmaextractor "github.com/kataras/figma-extractor"
-	"github.com/kataras/figma-extractor/pkg/figma"
+	figmaextractor "github.com/hellenic-development/figma-extractor"
+	"github.com/hellenic-development/figma-extractor/pkg/figma"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"

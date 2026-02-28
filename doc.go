@@ -11,7 +11,7 @@
 // The module path contains a hyphen but Go package names cannot, so the
 // package is named figmaextractor:
 //
-//	import "github.com/kataras/figma-extractor" // package figmaextractor
+//	import "github.com/hellenic-development/figma-extractor" // package figmaextractor
 //
 // # Quick start
 //

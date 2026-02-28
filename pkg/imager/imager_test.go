@@ -3,7 +3,7 @@ package imager
 import (
 	"testing"
 
-	"github.com/kataras/figma-extractor/pkg/figma"
+	"github.com/hellenic-development/figma-extractor/pkg/figma"
 )
 
 func TestCollectImageFillNodes(t *testing.T) {

@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kataras/figma-extractor/pkg/extractor"
-	"github.com/kataras/figma-extractor/pkg/figma"
-	"github.com/kataras/figma-extractor/pkg/formatter"
-	"github.com/kataras/figma-extractor/pkg/imager"
+	"github.com/hellenic-development/figma-extractor/pkg/extractor"
+	"github.com/hellenic-development/figma-extractor/pkg/figma"
+	"github.com/hellenic-development/figma-extractor/pkg/formatter"
+	"github.com/hellenic-development/figma-extractor/pkg/imager"
 )
 
 // Options configures the extraction.

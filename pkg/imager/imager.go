@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kataras/figma-extractor/pkg/figma"
+	"github.com/hellenic-development/figma-extractor/pkg/figma"
 )
 
 // ExportConfig holds configuration for image export.

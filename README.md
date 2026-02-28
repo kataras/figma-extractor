@@ -19,7 +19,7 @@ A Go tool to extract design specifications from Figma files using the Figma REST
 The only requirement is the [Go Programming Language](https://go.dev/dl/).
 
 ```bash
-go install github.com/kataras/figma-extractor/cmd/figma-extractor@latest
+go install github.com/hellenic-development/figma-extractor/cmd/figma-extractor@latest
 ```
 
 ## Usage

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kataras/figma-extractor/pkg/figma"
+	"github.com/hellenic-development/figma-extractor/pkg/figma"
 )
 
 // DesignSpecs represents the complete set of design specifications extracted from a Figma file.

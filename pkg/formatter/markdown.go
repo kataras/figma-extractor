@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kataras/figma-extractor/pkg/extractor"
+	"github.com/hellenic-development/figma-extractor/pkg/extractor"
 )
 
 // ToMarkdown transforms extracted design specifications into a well-formatted markdown document.
